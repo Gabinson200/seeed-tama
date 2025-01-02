@@ -1,7 +1,9 @@
-#include <lvgl.h>
 #define USE_ARDUINO_GFX_LIBRARY
+#include <lvgl.h>
 #include "lv_xiao_round_screen.h"
 #include "dino_sprites.h"
+#include "touch_swipe.h"
+#include "touch_sensor_functions.h"
 
 // Example image declarations
 LV_IMG_DECLARE(tile000);
@@ -31,6 +33,11 @@ typedef struct {
     lv_coord_t base_x;  // X position of the sprite stack
     lv_coord_t base_y;  // Y position of the sprite stack
 } pivot_sprite_t;
+
+static swipe_tracker_t g_swipeTracker = {
+    SWIPE_IDLE, false, SWIPE_DIR_NONE, 
+    0,0, 0,0, 0,0  // initializing startX, startY, currentX, currentY, lastGoodX, lastGoodY
+};
 
 // We'll store up to 20 sprites
 static pivot_sprite_t g_sprites[20];
@@ -140,6 +147,7 @@ static void touch_event_cb(lv_event_t * e) {
     }
 }
 
+
 // ---------------------------------------------------------
 //  Create sprites with pseudo-3D effect
 // ---------------------------------------------------------
@@ -185,9 +193,9 @@ void create_sprites_pseudo_3d(uint16_t num_sprites,
     }
 
     // Attach event callbacks for the screen
-    lv_obj_add_event_cb(lv_scr_act(), touch_event_cb, LV_EVENT_PRESSED, NULL);
-    lv_obj_add_event_cb(lv_scr_act(), touch_event_cb, LV_EVENT_GESTURE, NULL);
-    lv_obj_add_event_cb(lv_scr_act(), touch_event_cb, LV_EVENT_RELEASED, NULL);
+    //lv_obj_add_event_cb(lv_scr_act(), touch_event_cb, LV_EVENT_PRESSED, NULL);
+    //lv_obj_add_event_cb(lv_scr_act(), touch_event_cb, LV_EVENT_GESTURE, NULL);
+    //lv_obj_add_event_cb(lv_scr_act(), touch_event_cb, LV_EVENT_RELEASED, NULL);
 }
 
 // ---------------------------------------------------------
@@ -203,35 +211,84 @@ static lv_color_t buf2[BUFF_SIZE];
 
 void setup() {
     Serial.begin(115200);
+    delay(100); // Give time for Serial to initialize
+    
+    Serial.println("Starting initialization...");
 
     // 1) Initialize LVGL
     lv_init();
+    Serial.println("LVGL initialized");
 
-    // 2) Initialize the XIAO round display
+    // 2) Initialize the display and touch
     lv_xiao_disp_init();
+    Serial.println("Display initialized");
+    
     lv_xiao_touch_init();
+    Serial.println("Touch initialized");
 
-    // 3) Create a bigger draw buffer
-    static lv_disp_draw_buf_t draw_buf;
-    lv_disp_draw_buf_init(&draw_buf, buf1, buf2, BUFF_SIZE);
+    // Create our rotating sprites
+    create_sprites_pseudo_3d(/*num_sprites=*/15, /*base_x=*/120, /*base_y=*/90, /*spacing_y=*/1, /*zoom_step=*/0);
+    Serial.println("Created sprites");
 
-    // 4) Get the default display
-    lv_disp_t * disp = lv_disp_get_default();
-    if (disp) {
-        lv_disp_drv_t * disp_drv = (lv_disp_drv_t *)disp->driver;
-        if (disp_drv) {
-            // Override the driver's draw_buf
-            disp_drv->draw_buf = &draw_buf;
-            disp_drv->hor_res = 240;
-            disp_drv->ver_res = 240;
+    Serial.println("Setup complete");
+}
+
+// Pseudocode
+void loop() {
+  /*
+    // If user touches in the sprite area, spin
+    if (get_touch_in_area(
+            SPRITE_AREA_X,
+            SPRITE_AREA_X + SPRITE_AREA_WIDTH,
+            SPRITE_AREA_Y,
+            SPRITE_AREA_Y + SPRITE_AREA_HEIGHT,
+            false // 'view' param -> whether to draw a highlight shape
+        ))
+    {
+        Serial.println("Sprite area touched -> Spin!");
+        spin_stack(current_angle, current_angle + 200, 300, false);
+        current_angle += 200;
+    }
+    */
+
+
+    /*
+    // Suppose you want to detect a LEFT swipe from (100,120)-(140,160)
+    if (swipe_in_area(100,140,20,60, SWIPE_DIR_LEFT, 30, true)) {
+        Serial.println("Swiped left inside the area with length >= 30");
+    }
+
+    // Or detect any direction from a center-based area
+    if (swipe_in_area_center(120, 200, 20, 20, SWIPE_DIR_ANY, 50, true)) {
+        Serial.println("Swiped in any direction within center area (50px min length)!");
+    }
+    */
+
+    update_swipe_state(100, 140, 100, 140, 30, &g_swipeTracker);
+
+    // 2) If a swipe was just detected in that region, do something
+    if (g_swipeTracker.swipeDetected) {
+        switch(g_swipeTracker.swipeDir) {
+        case SWIPE_DIR_LEFT:
+            Serial.println("Left Swipe Action triggered!");
+            // e.g. spin_stack(...) or do whatever you want
+            break;
+        case SWIPE_DIR_RIGHT:
+            Serial.println("Right Swipe Action triggered!");
+            break;
+        case SWIPE_DIR_UP:
+            Serial.println("Up Swipe Action triggered!");
+            break;
+        case SWIPE_DIR_DOWN:
+            Serial.println("Down Swipe Action triggered!");
+            break;
+        default:
+            // Shouldn't happen
+            break;
         }
     }
 
-    // Create our rotating sprites
-    create_sprites_pseudo_3d(/*num_sprites=*/15, /*base_x=*/120, /*base_y=*/120, /*spacing_y=*/1, /*zoom_step=*/0);
-}
-
-void loop() {
     lv_timer_handler();
     delay(16);
 }
+
