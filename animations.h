@@ -35,6 +35,9 @@ void pet_anim(void * var, int32_t v);
 
 void item_anim(void * var, int32_t v);
 
+void rotate_anim(void * var, int32_t v);
+
+
 void stack_anim(
     pivot_sprite_t    *sprites,
     uint16_t           sprite_count,
@@ -87,6 +90,7 @@ bool touch_anim(
 );
 
 
+// Wrapper functions to be actually called in main
 
 void stack_anim_pet(
     pivot_sprite_t *sprites,
@@ -106,7 +110,8 @@ void stack_anim_item(
     bool            infinite
 );
 
-void item_rotate(
+
+void stack_anim_rotate(
     pivot_sprite_t *sprites,
     uint16_t        sprite_count,
     int32_t        *current_angle,
@@ -114,9 +119,5 @@ void item_rotate(
     uint32_t        duration,
     bool            infinite
 );
-
-
-
-
 
 #endif

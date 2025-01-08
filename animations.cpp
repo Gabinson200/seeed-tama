@@ -97,38 +97,57 @@ void item_anim(void * var, int32_t v) {
     // Center pivot so rotation is about image center
     lv_img_set_pivot(obj, img_width / 2, img_height / 2);
 
-    // 4) We’ll define an "angle fraction" from 0..1 for each 0..360 deg spin
-    //    v goes 0..3600 => fraction = v/3600 => 1 cycle per spin
-    float angle_f = v / 3600.0f;  // goes from 0..1 each rotation
+    // Ensure v wraps around every full rotation to avoid precision issues
+    int32_t wrapped_v = v % 3600; // Always between 0 and 3600
+    float angle_f = wrapped_v / 3600.0f; // Normalize to [0, 1]
 
-    // 5) ENTIRE STACK RISE/FALL
-    //    e.g. one full up/down cycle per spin. 
-    //    sin( angle_f * 2pi ) => 0..(up)..0..(down)..0 over 1 full spin 
-    float amplitude_rise = 10.0f;  // how high the entire stack rises/falls
-    float entire_stack_offset = sinf(angle_f * M_PI) * amplitude_rise;
+    // ENTIRE STACK RISE/FALL (Positive Only)
+    // Sin wave shifted and scaled to [0, 1]
+    float amplitude_rise = 10.0f;
+    float entire_stack_offset = (sinf(angle_f * 2.0f * M_PI) + 1.0f) * 0.5f * amplitude_rise;
 
-    // 6) PER-LAYER OFFSET that starts at 1, peaks at half-rotation, returns to 1:
-    //    wave in [0..1..0], then scale. 
-    //    wave= sin( angle_f*pi ), so wave=0 at angle_f=0 or 1, wave=1 at angle_f=0.5
-    float wave = sinf(angle_f * M_PI);      // 0..1..0
-    float amplitude_layer = 3.0f;           // scale for the layer spacing
-    float layer_offset = (1.0f * sprite_index) + (wave * (amplitude_layer * sprite_index));
+    // PER-LAYER OFFSET
+    // Sin wave already in [0, 1] range; no need to shift
+    float wave = sinf(angle_f * M_PI);
+    float amplitude_layer = 3.0f;
+    float baseline_offset = 2.0f;       // Offset layers at the start and end
+    float layer_offset = baseline_offset * sprite_index + (wave * amplitude_layer * sprite_index);
 
-    // 7) COMBINE OFFSETS
-    //    Let's do final y_pos = base_y - (entire_stack_offset + layer_offset).
-    //    That means we move the whole stack up/down by entire_stack_offset,
-    //    and also shift each layer by layer_offset (which is near 1..some value..1).
-    //    Adjust to taste if you want "layer_offset" bigger or smaller, or 
-    //    e.g. multiply layer_offset by 2, etc.
-
+    // FINAL POSITION
     lv_coord_t x_pos = sq_data->base_x - (img_width / 2);
-
-    // Subtract both offsets from the base_y
     lv_coord_t y_pos = sq_data->base_y 
-                     - (lv_coord_t)entire_stack_offset 
-                     - (lv_coord_t)layer_offset;
+                    - (lv_coord_t)entire_stack_offset 
+                    - (lv_coord_t)layer_offset;
 
-    // 8) Place sprite
+    lv_obj_set_pos(obj, x_pos, y_pos);
+}
+
+void rotate_anim(void * var, int32_t v){
+    pivot_sprite_t  * sq_data = (pivot_sprite_t *)var;
+    lv_obj_t        * obj     = sq_data->obj;
+
+    // 1) Spin each sprite by "v" degrees (LVGL uses 0..3600 = 0..360 deg).
+    lv_img_set_angle(obj, v);
+
+    // 2) Get sprite index (0..total_sprites-1) and total
+    uint16_t sprite_index   = sq_data->index;
+    uint16_t total_sprites  = sq_data->total_sprites;
+
+    // 3) Basic image info
+    const lv_img_dsc_t *img_dsc = (const lv_img_dsc_t *)lv_img_get_src(obj);
+    lv_coord_t img_width  = img_dsc->header.w;
+    lv_coord_t img_height = img_dsc->header.h;
+
+    // Center pivot so rotation is about image center
+    lv_img_set_pivot(obj, img_width / 2, img_height / 2);
+
+    float baseline_offset = 1.0f;  
+
+    // FINAL POSITION
+    lv_coord_t x_pos = sq_data->base_x - (img_width / 2);
+    lv_coord_t y_pos = sq_data->base_y 
+                    -baseline_offset* sprite_index;
+
     lv_obj_set_pos(obj, x_pos, y_pos);
 }
 
@@ -272,5 +291,24 @@ void stack_anim_item(
                duration,
                infinite,
                item_anim  // <--- pass your custom per-sprite function
+    );
+}
+
+void stack_anim_rotate(
+    pivot_sprite_t *sprites,
+    uint16_t        sprite_count,
+    int32_t        *current_angle,
+    int32_t         end_angle_offset,
+    uint32_t        duration,
+    bool            infinite
+){
+
+  stack_anim(sprites,
+               sprite_count,
+               current_angle,
+               end_angle_offset,
+               duration,
+               infinite,
+               rotate_anim  // <--- pass your custom per-sprite function
     );
 }
