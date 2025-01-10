@@ -6,6 +6,29 @@
 #include "animations.h"
 //include "ui.h"
 
+//###############################################################
+//            gesture recognition libs and vars
+//###############################################################
+
+#include <XIAO_BLE_SENSE_motion_recognition_inferencing.h>
+#include <LSM6DS3.h>
+#include <Wire.h>
+
+#define CONVERT_G_TO_MS2    9.80665f
+#define MAX_ACCEPTED_RANGE  2.0f        // starting 03/2022, models are generated setting range to +-2, but this example use Arudino library which set range to +-4g. If you are using an older model, ignore this value and use 4.0f instead
+
+static bool debug_nn = false; // Set this to true to see e.g. features generated from the raw signal
+//Create a instance of class LSM6DS3
+LSM6DS3 myIMU(I2C_MODE, 0x6A);  //I2C device address 0x6A
+
+float ei_get_sign(float number) {
+    return (number >= 0.0) ? 1.0 : -1.0;
+}
+
+//###############################################################
+//            UI vars and functions
+//###############################################################
+
 //sprite hex code files
 #include "dino_sprites.h"
 #include "pizza.h"
@@ -140,8 +163,6 @@ static void timer_cb(lv_timer_t *timer) {
     lv_arc_set_value(arcs[3], energy_value);
 }
 
-
-
 // Arc creation function
 void create_arcs(lv_obj_t *parent) {
     // Define common properties for all arcs
@@ -223,6 +244,9 @@ void create_arcs(lv_obj_t *parent) {
     lv_timer_create(timer_cb, 1000, arcs);
 }
 
+//###############################################################
+//            Game vars and functions
+//###############################################################
 
 
 // ---------------------------------------------------------
@@ -287,6 +311,19 @@ void setup() {
     delay(100); // Give time for Serial to initialize
     
     Serial.println("Starting initialization...");
+
+    //if (!IMU.begin()) {
+      if (!myIMU.begin()) {
+        ei_printf("Failed to initialize IMU!\r\n");
+    }
+    else {
+        ei_printf("IMU initialized\r\n");
+    }
+
+    if (EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME != 3) {
+        ei_printf("ERR: EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME should be equal to 3 (the 3 sensor axes)\n");
+        return;
+    }
 
     // 1) Initialize LVGL
     lv_init();
@@ -377,6 +414,91 @@ void setup() {
 
 // Pseudocode
 void loop() {
+
+  uint8_t buf1[64]="idle";
+  uint8_t buf2[64]="up&down";
+  uint8_t buf3[64]="bow";
+
+  ei_printf("\nStarting inferencing in 2 seconds...\n");
+
+  delay(2000);
+
+  ei_printf("Sampling...\n");
+
+  // Allocate a buffer here for the values we'll read from the IMU
+  float buffer[EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE] = { 0 };
+
+  for (size_t ix = 0; ix < EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE; ix += 3) {
+    // Determine the next tick (and then sleep later)
+    uint64_t next_tick = micros() + (EI_CLASSIFIER_INTERVAL_MS * 1500);
+
+    buffer[ix] = myIMU.readFloatAccelX();
+    buffer[ix+1] = myIMU.readFloatAccelY();
+    buffer[ix+2] = myIMU.readFloatAccelZ();
+
+
+    for (int i = 0; i < 3; i++) {
+        if (fabs(buffer[ix + i]) > MAX_ACCEPTED_RANGE) {
+            buffer[ix + i] = ei_get_sign(buffer[ix + i]) * MAX_ACCEPTED_RANGE;
+        }
+    }
+
+    buffer[ix + 0] *= CONVERT_G_TO_MS2;
+    buffer[ix + 1] *= CONVERT_G_TO_MS2;
+    buffer[ix + 2] *= CONVERT_G_TO_MS2;
+
+    delayMicroseconds(next_tick - micros());
+  }
+
+  // Turn the raw buffer in a signal which we can the classify
+    signal_t signal;
+    int err = numpy::signal_from_buffer(buffer, EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE, &signal);
+    if (err != 0) {
+        ei_printf("Failed to create signal from buffer (%d)\n", err);
+        return;
+    }
+
+    // Run the classifier
+    ei_impulse_result_t result = { 0 };
+
+    err = run_classifier(&signal, &result, debug_nn);
+    if (err != EI_IMPULSE_OK) {
+        ei_printf("ERR: Failed to run classifier (%d)\n", err);
+        return;
+    }
+
+    // print the predictions
+    ei_printf("Predictions ");
+    ei_printf("(DSP: %d ms., Classification: %d ms., Anomaly: %d ms.)",
+        result.timing.dsp, result.timing.classification, result.timing.anomaly);
+    ei_printf(": \n");
+    for (size_t ix = 0; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
+        ei_printf("    %s: %.3f\n", result.classification[ix].label, result.classification[ix].value);
+    }
+    #if EI_CLASSIFIER_HAS_ANOMALY == 1
+        ei_printf("    anomaly score: %.3f\n", result.anomaly);
+    #endif
+
+  if (result.classification[0].value > 0.5) {
+      digitalWrite(LED_RED, LOW);
+      digitalWrite(LED_BLUE, HIGH);                          // idle       red
+      digitalWrite(LED_GREEN, HIGH);
+      delay(2000);
+   }
+   
+  if (result.classification[1].value > 0.5) {
+       digitalWrite(LED_RED, HIGH);                              //up&down           blue
+       digitalWrite(LED_BLUE, LOW);
+       digitalWrite(LED_GREEN, HIGH);
+      delay(2000);
+   }
+ 
+    if (result.classification[2].value > 0.5) {
+       digitalWrite(LED_RED, HIGH);                              //up&down           green
+       digitalWrite(LED_BLUE, HIGH);
+       digitalWrite(LED_GREEN, LOW);
+      delay(2000);
+   }
 
 
   swipe_anim(
